@@ -407,10 +407,7 @@ pub struct Map<F, G, O1> {
 
 impl<'a, I, O1, O2, E, F: Parser<I, O1, E>, G: Fn(O1) -> O2> Parser<I, O2, E> for Map<F, G, O1> {
   fn parse(&mut self, i: I) -> IResult<I, O2, E> {
-    match self.f.parse(i) {
-      Err(e) => iresult_map_out(Err(e), &mut self.g),
-      Ok((i, o)) => Ok((i, (self.g)(o))),
-    }
+    iresult_map_out(self.f.parse(i), &mut self.g)
   }
 }
 
