@@ -239,7 +239,8 @@ where
 {
   move |i: I| match f.parse(i.clone()) {
     Ok(o) => Ok(o),
-    Err(Err::Incomplete(i)) => Err(Err::Incomplete(i)),
+    Err(Err::IncompleteSuccess(o, n)) => Err(Err::IncompleteSuccess(o, n)),
+    Err(Err::IncompleteFail(e, n)) => Err(Err::IncompleteFail(E::add_context(i, context, e), n)),
     Err(Err::Error(e)) => Err(Err::Error(E::add_context(i, context, e))),
     Err(Err::Failure(e)) => Err(Err::Failure(E::add_context(i, context, e))),
   }
@@ -587,7 +588,7 @@ macro_rules! error_node_position(
 /// ```
 #[cfg(feature = "std")]
 #[cfg_attr(feature = "docsrs", doc(cfg(feature = "std")))]
-pub fn dbg_dmp<'a, F, O, E: std::fmt::Debug>(
+pub fn dbg_dmp<'a, F, O: std::fmt::Debug, E: std::fmt::Debug>(
   f: F,
   context: &'static str,
 ) -> impl Fn(&'a [u8]) -> IResult<&'a [u8], O, E>
