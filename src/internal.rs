@@ -15,7 +15,7 @@ use core::num::NonZeroUsize;
 ///
 /// Outside of the parsing code, you can use the [Finish::finish] method to convert
 /// it to a more common result type
-pub type IResult<I, O, E = error::Error<I>> = Result<(I, O), Err<E>>;
+pub type IResult<I, O, E = error::Error<I>> = Result<(I, O), Err<I, O, E>>;
 
 /// Helper trait to convert a parser's result to a more manageable type
 pub trait Finish<I, O, E> {
@@ -23,12 +23,10 @@ pub trait Finish<I, O, E> {
   /// management libraries. It keeps the same `Ok` branch, and merges `Err::Error`
   /// and `Err::Failure` into the `Err` side.
   ///
-  /// *warning*: if the result is `Err(Err::Incomplete(_))`, this method will panic.
-  /// - "complete" parsers: It will not be an issue, `Incomplete` is never used
-  /// - "streaming" parsers: `Incomplete` will be returned if there's not enough data
-  /// for the parser to decide, and you should gather more data before parsing again.
-  /// Once the parser returns either `Ok(_)`, `Err(Err::Error(_))` or `Err(Err::Failure(_))`,
-  /// you can get out of the parsing loop and call `finish()` on the parser's result
+  /// If the result is `Err(Err::IncompleteFail(_))`, this method will return an error,
+  /// while if the resutl is `Err(Err::IncompleteSuccess(_))`, this method will return a successful parse result.
+  /// Use `is_incomplete()` on `IResult::Err` if you have more data and want to check
+  /// if that data is needed to finish parsing.
   fn finish(self) -> Result<(I, O), E>;
 }
 
@@ -37,9 +35,8 @@ impl<I, O, E> Finish<I, O, E> for IResult<I, O, E> {
     match self {
       Ok(res) => Ok(res),
       Err(Err::Error(e)) | Err(Err::Failure(e)) => Err(e),
-      Err(Err::Incomplete(_)) => {
-        panic!("Cannot call `finish()` on `Err(Err::Incomplete(_))`: this result means that the parser does not have enough data to decide, you should gather more data and try to reapply  the parser instead")
-      }
+      Err(Err::IncompleteFail(e, _)) => Err(e),
+      Err(Err::IncompleteSuccess(res, _)) => Ok(res)
     }
   }
 }
@@ -80,12 +77,16 @@ impl Needed {
 
 /// The `Err` enum indicates the parser was not successful
 ///
-/// It has three cases:
+/// It has four cases:
 ///
-/// * `Incomplete` indicates that more data is needed to decide. The `Needed` enum
-/// can contain how many additional bytes are necessary. If you are sure your parser
-/// is working on full data, you can wrap your parser with the `complete` combinator
-/// to transform that case in `Error`
+/// * `IncompleteFail` indicates that more data is needed to decide, but that parsing
+/// should fail if no more data is available. The `Needed` enum can contain how many
+/// additional bytes are necessary. If you are sure your parser is working on full data,
+/// you can wrap your parser with the `complete` combinator to transform that case in `Error`.
+/// * `IncompleteSuccess` indicates that more data is needed to decide, but that parsing
+/// should succeed if no more data is available. The `Needed` enum can contain how many
+/// additional bytes are necessary. If you are sure your parser is working on full data,
+/// you can wrap your parser with the `complete` combinator to extract the parse result.
 /// * `Error` means some parser did not succeed, but another one might (as an example,
 /// when testing different branches of an `alt` combinator)
 /// * `Failure` indicates an unrecoverable error. As an example, if you recognize a prefix
@@ -94,9 +95,11 @@ impl Needed {
 ///
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(nightly, warn(rustdoc::missing_doc_code_examples))]
-pub enum Err<E> {
-  /// There was not enough data
-  Incomplete(Needed),
+pub enum Err<I, O, E> {
+  /// There was not enough data, and this should be a failure on end-of-data
+  IncompleteFail(E, Needed),
+  /// There was not enough data, but this should be a success on end-of-data
+  IncompleteSuccess((I, O), Needed),
   /// The parser had an error (recoverable)
   Error(E),
   /// The parser had an unrecoverable error: we got to the right
@@ -105,59 +108,88 @@ pub enum Err<E> {
   Failure(E),
 }
 
-impl<E> Err<E> {
+impl<I, O, E> Err<I, O, E> {
   /// Tests if the result is Incomplete
   pub fn is_incomplete(&self) -> bool {
-    if let Err::Incomplete(_) = self {
-      true
-    } else {
-      false
-    }
+    matches!(self, Self::IncompleteFail(..) | Self::IncompleteSuccess(..))
   }
 
   /// Applies the given function to the inner error
-  pub fn map<E2, F>(self, f: F) -> Err<E2>
+  pub fn map_err<E2, F>(self, f: F) -> Err<I, O, E2>
   where
     F: FnOnce(E) -> E2,
   {
     match self {
-      Err::Incomplete(n) => Err::Incomplete(n),
+      Err::IncompleteFail(e, n) => Err::IncompleteFail(f(e), n),
+      Err::IncompleteSuccess(io, n) => Err::IncompleteSuccess(io, n),
       Err::Failure(t) => Err::Failure(f(t)),
       Err::Error(t) => Err::Error(f(t)),
     }
   }
 
+  // TODO: make these public if there would be a public use for them
+
+  /// Replaces the input of an incomplete success
+  pub(crate) fn replace_input<I2>(self, i2: I2) -> Err<I2, O, E> {
+    match self {
+      Err::IncompleteFail(e, n) => Err::IncompleteFail(e, n),
+      Err::IncompleteSuccess((_, o), n) => Err::IncompleteSuccess((i2, o), n),
+      Err::Failure(e) => Err::Failure(e),
+      Err::Error(e) => Err::Error(e),
+    }
+  }
+  /// Replaces the input type; panics if an input is actually needed
+  pub(crate) fn replace_input_type<I2>(self) -> Err<I2, O, E> {
+    match self {
+      Err::IncompleteFail(e, n) => Err::IncompleteFail(e, n),
+      Err::IncompleteSuccess(..) => panic!("Cannot use replace_input_type when input is needed"),
+      Err::Failure(e) => Err::Failure(e),
+      Err::Error(e) => Err::Error(e),
+    }
+  }
+  /// Replaces the output type; panics if an output is actually needed
+  pub(crate) fn replace_output_type<O2>(self) -> Err<I, O2, E> {
+    match self {
+      Err::IncompleteFail(e, n) => Err::IncompleteFail(e, n),
+      Err::IncompleteSuccess(..) => panic!("Cannot use replace_output_type when input is needed"),
+      Err::Failure(e) => Err::Failure(e),
+      Err::Error(e) => Err::Error(e),
+    }
+  }
+
   /// Automatically converts between errors if the underlying type supports it
-  pub fn convert<F>(e: Err<F>) -> Self
+  pub fn convert<F>(e: Err<I, O, F>) -> Self
   where
     E: From<F>,
   {
-    e.map(crate::lib::std::convert::Into::into)
+    e.map_err(crate::lib::std::convert::Into::into)
   }
 }
 
-impl<T> Err<(T, ErrorKind)> {
+impl<I, O, T> Err<I, O, (T, ErrorKind)> {
   /// Maps `Err<(T, ErrorKind)>` to `Err<(U, ErrorKind)>` with the given `F: T -> U`
-  pub fn map_input<U, F>(self, f: F) -> Err<(U, ErrorKind)>
+  pub fn map_input<U, F>(self, f: F) -> Err<I, O, (U, ErrorKind)>
   where
     F: FnOnce(T) -> U,
   {
     match self {
-      Err::Incomplete(n) => Err::Incomplete(n),
+      Err::IncompleteFail((input, k), n) => Err::IncompleteFail((f(input), k), n),
+      Err::IncompleteSuccess(io, n) => Err::IncompleteSuccess(io, n),
       Err::Failure((input, k)) => Err::Failure((f(input), k)),
       Err::Error((input, k)) => Err::Error((f(input), k)),
     }
   }
 }
 
-impl<T> Err<error::Error<T>> {
+impl<I, O, T> Err<I, O, error::Error<T>> {
   /// Maps `Err<error::Error<T>>` to `Err<error::Error<U>>` with the given `F: T -> U`
-  pub fn map_input<U, F>(self, f: F) -> Err<error::Error<U>>
+  pub fn map_input<U, F>(self, f: F) -> Err<I, O, error::Error<U>>
   where
     F: FnOnce(T) -> U,
   {
     match self {
-      Err::Incomplete(n) => Err::Incomplete(n),
+      Err::IncompleteFail(error::Error { input, code }, n) => Err::IncompleteFail(error::Error { input: f(input), code }, n),
+      Err::IncompleteSuccess(io, n) => Err::IncompleteSuccess(io, n),
       Err::Failure(error::Error { input, code }) => Err::Failure(error::Error {
         input: f(input),
         code,
@@ -173,51 +205,53 @@ impl<T> Err<error::Error<T>> {
 #[cfg(feature = "alloc")]
 use crate::lib::std::{borrow::ToOwned, string::String, vec::Vec};
 #[cfg(feature = "alloc")]
-impl Err<(&[u8], ErrorKind)> {
+impl<I, O> Err<I, O, (&[u8], ErrorKind)> {
   /// Obtaining ownership
   #[cfg_attr(feature = "docsrs", doc(cfg(feature = "alloc")))]
-  pub fn to_owned(self) -> Err<(Vec<u8>, ErrorKind)> {
+  pub fn to_owned(self) -> Err<I, O, (Vec<u8>, ErrorKind)> {
     self.map_input(ToOwned::to_owned)
   }
 }
 
 #[cfg(feature = "alloc")]
-impl Err<(&str, ErrorKind)> {
+impl<I, O> Err<I, O, (&str, ErrorKind)> {
   /// Obtaining ownership
   #[cfg_attr(feature = "docsrs", doc(cfg(feature = "alloc")))]
-  pub fn to_owned(self) -> Err<(String, ErrorKind)> {
+  pub fn to_owned(self) -> Err<I, O, (String, ErrorKind)> {
     self.map_input(ToOwned::to_owned)
   }
 }
 
 #[cfg(feature = "alloc")]
-impl Err<error::Error<&[u8]>> {
+impl<I, O> Err<I, O, error::Error<&[u8]>> {
   /// Obtaining ownership
   #[cfg_attr(feature = "docsrs", doc(cfg(feature = "alloc")))]
-  pub fn to_owned(self) -> Err<error::Error<Vec<u8>>> {
+  pub fn to_owned(self) -> Err<I, O, error::Error<Vec<u8>>> {
     self.map_input(ToOwned::to_owned)
   }
 }
 
 #[cfg(feature = "alloc")]
-impl Err<error::Error<&str>> {
+impl<I, O> Err<I, O, error::Error<&str>> {
   /// Obtaining ownership
   #[cfg_attr(feature = "docsrs", doc(cfg(feature = "alloc")))]
-  pub fn to_owned(self) -> Err<error::Error<String>> {
+  pub fn to_owned(self) -> Err<I, O, error::Error<String>> {
     self.map_input(ToOwned::to_owned)
   }
 }
 
-impl<E: Eq> Eq for Err<E> {}
+impl<I: Eq, O: Eq, E: Eq> Eq for Err<I, O, E> {}
 
-impl<E> fmt::Display for Err<E>
+impl<I, O, E> fmt::Display for Err<I, O, E>
 where
   E: fmt::Debug,
 {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
-      Err::Incomplete(Needed::Size(u)) => write!(f, "Parsing requires {} bytes/chars", u),
-      Err::Incomplete(Needed::Unknown) => write!(f, "Parsing requires more data"),
+      Err::IncompleteFail(_e, Needed::Size(u)) => write!(f, "Parsing requires {} bytes/chars (would fail if eof)", u),
+      Err::IncompleteFail(_e, Needed::Unknown) => write!(f, "Parsing requires more data (would fail if eof)"),
+      Err::IncompleteSuccess(_io, Needed::Size(u)) => write!(f, "Parsing requires {} bytes/chars (would succeed if eof)", u),
+      Err::IncompleteSuccess(_io, Needed::Unknown) => write!(f, "Parsing requires more data (would succeed if eof)"),
       Err::Failure(c) => write!(f, "Parsing Failure: {:?}", c),
       Err::Error(c) => write!(f, "Parsing Error: {:?}", c),
     }
@@ -228,12 +262,39 @@ where
 use std::error::Error;
 
 #[cfg(feature = "std")]
-impl<E> Error for Err<E>
+impl<I, O, E> Error for Err<I, O, E>
 where
+  I: fmt::Debug,
+  O: fmt::Debug,
   E: fmt::Debug,
 {
   fn source(&self) -> Option<&(dyn Error + 'static)> {
     None // no underlying error
+  }
+}
+
+/// Converts an Ok parse result into an IncompleteSuccess
+/// Does not replace the Needed value if already an Incomplete
+// TODO: should it?
+pub(crate) fn to_incomplete_success<I, O, E>(res: IResult<I, O, E>, needed: Needed) -> IResult<I, O, E> {
+  match res {
+    Ok((i, o)) => Err(Err::IncompleteSuccess((i, o), needed)),
+    Err(Err::IncompleteSuccess((i, o), n)) => Err(Err::IncompleteSuccess((i, o), n)),
+    Err(e) => Err(e)
+  }
+}
+
+/// Applies the given function to an IResult's output
+pub(crate) fn iresult_map_out<I, O, O2, E, F>(res: IResult<I, O, E>, f: F) -> IResult<I, O2, E>
+where
+  F: FnOnce(O) -> O2,
+{
+  match res {
+    Ok((i, o)) => Ok((i, f(o))),
+    Err(Err::IncompleteFail(e, n)) => Err(Err::IncompleteFail(e, n)),
+    Err(Err::IncompleteSuccess((i, o), n)) => Err(Err::IncompleteSuccess((i, f(o)), n)),
+    Err(Err::Failure(e)) => Err(Err::Failure(e)),
+    Err(Err::Error(e)) => Err(Err::Error(e)),
   }
 }
 
@@ -347,7 +408,7 @@ pub struct Map<F, G, O1> {
 impl<'a, I, O1, O2, E, F: Parser<I, O1, E>, G: Fn(O1) -> O2> Parser<I, O2, E> for Map<F, G, O1> {
   fn parse(&mut self, i: I) -> IResult<I, O2, E> {
     match self.f.parse(i) {
-      Err(e) => Err(e),
+      Err(e) => iresult_map_out(Err(e), &mut self.g),
       Ok((i, o)) => Ok((i, (self.g)(o))),
     }
   }
@@ -365,8 +426,11 @@ impl<'a, I, O1, O2, E, F: Parser<I, O1, E>, G: Fn(O1) -> H, H: Parser<I, O2, E>>
   for FlatMap<F, G, O1>
 {
   fn parse(&mut self, i: I) -> IResult<I, O2, E> {
-    let (i, o1) = self.f.parse(i)?;
-    (self.g)(o1).parse(i)
+    match self.f.parse(i) {
+      Err(Err::IncompleteSuccess((i, o), n)) => to_incomplete_success((self.g)(o).parse(i), n),
+      Err(e) => Err(e.replace_output_type()),
+      Ok((i, o)) => (self.g)(o).parse(i),
+    }
   }
 }
 
@@ -382,9 +446,22 @@ impl<'a, I, O1, O2, E, F: Parser<I, O1, E>, G: Parser<O1, O2, E>> Parser<I, O2, 
   for AndThen<F, G, O1>
 {
   fn parse(&mut self, i: I) -> IResult<I, O2, E> {
-    let (i, o1) = self.f.parse(i)?;
-    let (_, o2) = self.g.parse(o1)?;
-    Ok((i, o2))
+    match self.f.parse(i) {
+      Ok((i, o1)) => {
+        match self.g.parse(o1) {
+          Ok((_, o2)) => Ok((i, o2)),
+          Err(e) => Err(e.replace_input(i))
+        }
+      },
+      Err(Err::IncompleteSuccess((i, o1), n)) => {
+        match self.g.parse(o1) {
+          Ok((_, o2)) => Err(Err::IncompleteSuccess((i, o2), n)),
+          Err(Err::IncompleteSuccess((_, o2), n2)) => Err(Err::IncompleteSuccess((i, o2), n2)),
+          Err(e) => Err(e.replace_input_type())
+        }
+      },
+      Err(e) => Err(e.replace_output_type()),
+    }
   }
 }
 
@@ -399,9 +476,11 @@ impl<'a, I, O1, O2, E, F: Parser<I, O1, E>, G: Parser<I, O2, E>> Parser<I, (O1, 
   for And<F, G>
 {
   fn parse(&mut self, i: I) -> IResult<I, (O1, O2), E> {
-    let (i, o1) = self.f.parse(i)?;
-    let (i, o2) = self.g.parse(i)?;
-    Ok((i, (o1, o2)))
+    match self.f.parse(i) {
+      Ok((i, o1)) => iresult_map_out(self.g.parse(i), |o2| (o1, o2)),
+      Err(Err::IncompleteSuccess((i, o1), n)) => to_incomplete_success(iresult_map_out(self.g.parse(i), |o2| (o1, o2)), n),
+      Err(e) => Err(e.replace_output_type())
+    }
   }
 }
 
@@ -451,7 +530,8 @@ impl<
       Ok((i, o)) => Ok((i, o.into())),
       Err(Err::Error(e)) => Err(Err::Error(e.into())),
       Err(Err::Failure(e)) => Err(Err::Failure(e.into())),
-      Err(Err::Incomplete(e)) => Err(Err::Incomplete(e)),
+      Err(Err::IncompleteFail(e, n)) => Err(Err::IncompleteFail(e.into(), n)),
+      Err(Err::IncompleteSuccess((i, o), n)) => Err(Err::IncompleteSuccess((i, o.into()), n))
     }
   }
 }
@@ -477,13 +557,19 @@ mod tests {
     // deactivating that test for now because it'll have different values depending on the rust version
     // assert_size!(IResult<&str, &str, u32>, 40);
     assert_size!(Needed, 8);
-    assert_size!(Err<u32>, 16);
+    assert_size!(Err<&[u8], &[u8], u32>, 16);
     assert_size!(ErrorKind, 1);
   }
 
   #[test]
   fn err_map_test() {
-    let e = Err::Error(1);
-    assert_eq!(e.map(|v| v + 1), Err::Error(2));
+    let e: Err<&[u8], &[u8], i32> = Err::Error(1);
+    assert_eq!(e.map_err(|v| v + 1), Err::Error(2));
+  }
+
+  #[test]
+  fn iresult_map_out_test() {
+    let e: Err<&[u8; 1], i32, i32> = Err::IncompleteSuccess((&[2], 4), Needed::Unknown);
+    assert_eq!(iresult_map_out(Err(e), |n| n*2), Err(Err::IncompleteSuccess((&[2], 8), Needed::Unknown)))
   }
 }
