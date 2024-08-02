@@ -735,7 +735,7 @@ where
 /// assert_eq!(parsed, [("abc", 3usize), ("defg", 4), ("hijkl", 5), ("mnopqr", 6)].iter().cloned().collect());
 /// assert_eq!(res, Ok(("123", ())));
 /// ```
-pub fn iterator<Input, Output, Error, F>(input: Input, f: F) -> ParserIterator<Input, Error, F>
+pub fn iterator<Input, Output, Error, F>(input: Input, f: F) -> ParserIterator<Input, Output, Error, F>
 where
   F: Parser<Input, Output, Error>,
   Error: ParseError<Input>,
@@ -748,24 +748,25 @@ where
 }
 
 /// Main structure associated to the [iterator] function.
-pub struct ParserIterator<I, E, F> {
+pub struct ParserIterator<I, O, E, F> {
   iterator: F,
   input: I,
-  state: Option<State<E>>,
+  state: Option<State<I, O, E>>,
 }
 
-impl<I: Clone, E, F> ParserIterator<I, E, F> {
+impl<I: Clone, O, E, F> ParserIterator<I, O, E, F> {
   /// Returns the remaining input if parsing was successful, or the error if we encountered an error.
-  pub fn finish(mut self) -> IResult<I, (), E> {
+  pub fn finish(mut self) -> IResult<I, Option<O>, E> {
     match self.state.take().unwrap() {
-      State::Running | State::Done => Ok((self.input, ())),
+      State::Running | State::Done => Ok((self.input, None)),
       State::Failure(e) => Err(Err::Failure(e)),
-      State::Incomplete(i) => Err(Err::Incomplete(i)),
+      State::IncompleteFail(e, n) => Err(Err::IncompleteFail(e, n)),
+      State::IncompleteSuccess(i, o, n) => Err(Err::IncompleteSuccess((i, Some(o)), n)),
     }
   }
 }
 
-impl<'a, Input, Output, Error, F> core::iter::Iterator for &'a mut ParserIterator<Input, Error, F>
+impl<'a, Input, Output, Error, F> core::iter::Iterator for &'a mut ParserIterator<Input, Output, Error, F>
 where
   F: FnMut(Input) -> IResult<Input, Output, Error>,
   Input: Clone,
@@ -790,8 +791,12 @@ where
           self.state = Some(State::Failure(e));
           None
         }
-        Err(Err::Incomplete(i)) => {
-          self.state = Some(State::Incomplete(i));
+        Err(Err::IncompleteFail(e, n)) => {
+          self.state = Some(State::IncompleteFail(e, n));
+          None
+        }
+        Err(Err::IncompleteSuccess((i, o), n)) => {
+          self.state = Some(State::IncompleteSuccess(i, o, n));
           None
         }
       }
@@ -801,11 +806,12 @@ where
   }
 }
 
-enum State<E> {
+enum State<I, O, E> {
   Running,
   Done,
   Failure(E),
-  Incomplete(Needed),
+  IncompleteFail(E, Needed),
+  IncompleteSuccess(I, O, Needed),
 }
 
 /// a parser which always succeeds with given value without consuming any input.
