@@ -671,6 +671,7 @@ where
 {
   move |input: I| match parser.parse(input) {
     Err(Err::Error(e)) => Err(Err::Failure(e)),
+    // TODO: do we need to split the Incomplete fail state?
     rest => rest,
   }
 }
