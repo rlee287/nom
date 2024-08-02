@@ -509,7 +509,9 @@ where
     match parser.parse(input) {
       Ok(_) => Err(Err::Error(E::from_error_kind(i, ErrorKind::Not))),
       Err(Err::Error(_)) => Ok((i, ())),
-      Err(e) => Err(e),
+      Err(Err::IncompleteFail(_, n)) => Err(Err::IncompleteSuccess((i, ()), n)),
+      Err(Err::IncompleteSuccess(_, n)) => Err(Err::IncompleteFail(E::from_error_kind(i, ErrorKind::Not), n)),
+      Err(e) => Err(e.replace_output_type()),
     }
   }
 }
