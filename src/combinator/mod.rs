@@ -710,7 +710,8 @@ where
     Ok((i, o)) => Ok((i, o.into())),
     Err(Err::Error(e)) => Err(Err::Error(e.into())),
     Err(Err::Failure(e)) => Err(Err::Failure(e.into())),
-    Err(Err::Incomplete(e)) => Err(Err::Incomplete(e)),
+    Err(Err::IncompleteFail(e, n)) => Err(Err::IncompleteFail(e.into(), n)),
+    Err(Err::IncompleteSuccess((i, o), n)) => Err(Err::IncompleteSuccess((i, o.into()), n))
   }
 }
 
