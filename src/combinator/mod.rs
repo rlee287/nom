@@ -442,12 +442,22 @@ where
 {
   move |input: I| {
     let i = input.clone();
-    let (input, o) = first.parse(input)?;
-
-    if second(o.borrow()) {
-      Ok((input, o))
-    } else {
-      Err(Err::Error(E::from_error_kind(i, ErrorKind::Verify)))
+    match first.parse(input) {
+      Ok((input, o)) => {
+        if second(o.borrow()) {
+          Ok((input, o))
+        } else {
+          Err(Err::Error(E::from_error_kind(i, ErrorKind::Verify)))
+        }
+      }
+      Err(Err::IncompleteSuccess((input, o), n)) => {
+        if second(o.borrow()) {
+          Err(Err::IncompleteSuccess((input, o), n))
+        } else {
+          Err(Err::IncompleteFail(E::from_error_kind(i, ErrorKind::Verify), n))
+        }
+      },
+      Err(e) => Err(e.replace_output_type())
     }
   }
 }
@@ -473,7 +483,7 @@ pub fn value<I, O1: Clone, O2, E: ParseError<I>, F>(
 where
   F: Parser<I, O2, E>,
 {
-  move |input: I| parser.parse(input).map(|(i, _)| (i, val.clone()))
+  move |input: I| iresult_map_out(parser.parse(input),|_| val.clone())
 }
 
 /// Succeeds if the child parser returns an error.
