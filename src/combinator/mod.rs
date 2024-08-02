@@ -76,8 +76,7 @@ where
   G: FnMut(O1) -> O2,
 {
   move |input: I| {
-    let (input, o1) = parser.parse(input)?;
-    Ok((input, f(o1)))
+    iresult_map_out(parser.parse(input), |o1| f(o1))
   }
 }
 
@@ -111,10 +110,13 @@ where
 {
   move |input: I| {
     let i = input.clone();
-    let (input, o1) = parser.parse(input)?;
-    match f(o1) {
-      Ok(o2) => Ok((input, o2)),
-      Err(e) => Err(Err::Error(E::from_external_error(i, ErrorKind::MapRes, e))),
+    let map_iresult = iresult_map_out(parser.parse(input), &mut f);
+    match map_iresult {
+      Ok((input, Ok(o2))) => Ok((input, o2)),
+      Ok((input, Err(e2))) => Err(Err::Error(E::from_external_error(input, ErrorKind::MapRes, e2))),
+      Err(Err::IncompleteSuccess((input, Ok(o2)), n)) => Err(Err::IncompleteSuccess((input, o2), n)),
+      Err(Err::IncompleteSuccess((_input, Err(e2)), n)) => Err(Err::IncompleteFail(E::from_external_error(i, ErrorKind::MapRes, e2), n)),
+      Err(e) => Err(e.replace_output_type()),
     }
   }
 }
@@ -149,10 +151,13 @@ where
 {
   move |input: I| {
     let i = input.clone();
-    let (input, o1) = parser.parse(input)?;
-    match f(o1) {
-      Some(o2) => Ok((input, o2)),
-      None => Err(Err::Error(E::from_error_kind(i, ErrorKind::MapOpt))),
+    let map_iresult = iresult_map_out(parser.parse(input), &mut f);
+    match map_iresult {
+      Ok((input, Some(o2))) => Ok((input, o2)),
+      Ok((input, None)) => Err(Err::Error(E::from_error_kind(input, ErrorKind::MapOpt))),
+      Err(Err::IncompleteSuccess((input, Some(o2)), n)) => Err(Err::IncompleteSuccess((input, o2), n)),
+      Err(Err::IncompleteSuccess((_input, None), n)) => Err(Err::IncompleteFail(E::from_error_kind(i, ErrorKind::MapOpt), n)),
+      Err(e) => Err(e.replace_output_type()),
     }
   }
 }
@@ -182,9 +187,15 @@ where
   G: Parser<O1, O2, E>,
 {
   move |input: I| {
-    let (input, o1) = parser.parse(input)?;
-    let (_, o2) = applied_parser.parse(o1)?;
-    Ok((input, o2))
+    // TODO: code duplication from internal.rs
+    let map_iresult = iresult_map_out(parser.parse(input), |o1| applied_parser.parse(o1));
+    match map_iresult {
+      Ok((input, Ok((_, o2)))) => Ok((input, o2)),
+      Ok((input, Err(e2))) => Err(e2.replace_input(input)),
+      Err(Err::IncompleteSuccess((input, Ok((_, o2))), n)) => Err(Err::IncompleteSuccess((input, o2), n)),
+      Err(Err::IncompleteSuccess((input, Err(e2)), _n)) => Err(e2.replace_input(input)),
+      Err(e) => Err(e.replace_output_type()),
+    }
   }
 }
 
@@ -212,9 +223,13 @@ where
   G: FnMut(O1) -> H,
   H: Parser<I, O2, E>,
 {
+  // TODO: code duplication from internal.rs
   move |input: I| {
-    let (input, o1) = parser.parse(input)?;
-    applied_parser(o1).parse(input)
+    match parser.parse(input) {
+      Err(Err::IncompleteSuccess((i, o), n)) => to_incomplete_success(applied_parser(o).parse(i), n),
+      Err(e) => Err(e.replace_output_type()),
+      Ok((i, o)) => applied_parser(o).parse(i),
+    }
   }
 }
 
