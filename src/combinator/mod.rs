@@ -543,8 +543,12 @@ where
       Ok((i, _)) => {
         let index = input.offset(&i);
         Ok((i, input.slice(..index)))
+      },
+      Err(Err::IncompleteSuccess((i, _), n)) => {
+        let index = input.offset(&i);
+        Err(Err::IncompleteSuccess((i, input.slice(..index)), n))
       }
-      Err(e) => Err(e),
+      Err(e) => Err(e.replace_output_type()),
     }
   }
 }
@@ -599,8 +603,13 @@ where
         let index = input.offset(&remaining);
         let consumed = input.slice(..index);
         Ok((remaining, (consumed, result)))
+      },
+      Err(Err::IncompleteSuccess((remaining, result), n)) => {
+        let index = input.offset(&remaining);
+        let consumed = input.slice(..index);
+        Err(Err::IncompleteSuccess((remaining, (consumed, result)), n))
       }
-      Err(e) => Err(e),
+      Err(e) => Err(e.replace_output_type()),
     }
   }
 }
