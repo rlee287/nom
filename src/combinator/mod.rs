@@ -354,7 +354,7 @@ pub fn eof<I: InputLength + Clone, E: ParseError<I>>(input: I) -> IResult<I, I, 
   }
 }
 
-/// Transforms Incomplete into `Error`.
+/// Transforms IncompleteFail into `Error` and extracts parse result from IncompleteSuccess.
 ///
 /// ```rust
 /// # use nom::{Err,error::ErrorKind, IResult};
@@ -375,7 +375,8 @@ where
   move |input: I| {
     let i = input.clone();
     match f.parse(input) {
-      Err(Err::Incomplete(_)) => Err(Err::Error(E::from_error_kind(i, ErrorKind::Complete))),
+      Err(Err::IncompleteFail(..)) => Err(Err::Error(E::from_error_kind(i, ErrorKind::Complete))),
+      Err(Err::IncompleteSuccess(io, _)) => Ok(io),
       rest => rest,
     }
   }
