@@ -450,7 +450,7 @@ pub trait InputTakeAtPosition: Sized {
   /// Looks for the first element of the input type for which the condition returns true,
   /// and returns the input up to this position.
   ///
-  /// *streaming version*: If no element is found matching the condition, this will return `Incomplete`
+  /// *streaming version*: If no element is found matching the condition, this will return `IncompleteSuccess`
   fn split_at_position<P, E: ParseError<Self>>(&self, predicate: P) -> IResult<Self, Self, E>
   where
     P: Fn(Self::Item) -> bool;
@@ -460,7 +460,7 @@ pub trait InputTakeAtPosition: Sized {
   ///
   /// Fails if the produced slice is empty.
   ///
-  /// *streaming version*: If no element is found matching the condition, this will return `Incomplete`
+  /// *streaming version*: If no element is found matching the condition, this will return `IncompleteSuccess`
   fn split_at_position1<P, E: ParseError<Self>>(
     &self,
     predicate: P,
@@ -506,7 +506,7 @@ impl<T: InputLength + InputIter + InputTake + Clone + UnspecializedInput> InputT
   {
     match self.position(predicate) {
       Some(n) => Ok(self.take_split(n)),
-      None => Err(Err::Incomplete(Needed::new(1))),
+      None => Err(Err::IncompleteSuccess(self.take_split(self.input_len()), Needed::new(1))),
     }
   }
 
@@ -521,7 +521,7 @@ impl<T: InputLength + InputIter + InputTake + Clone + UnspecializedInput> InputT
     match self.position(predicate) {
       Some(0) => Err(Err::Error(E::from_error_kind(self.clone(), e))),
       Some(n) => Ok(self.take_split(n)),
-      None => Err(Err::Incomplete(Needed::new(1))),
+      None => Err(Err::IncompleteSuccess(self.take_split(self.input_len()), Needed::new(1))),
     }
   }
 
@@ -533,7 +533,7 @@ impl<T: InputLength + InputIter + InputTake + Clone + UnspecializedInput> InputT
     P: Fn(Self::Item) -> bool,
   {
     match self.split_at_position(predicate) {
-      Err(Err::Incomplete(_)) => Ok(self.take_split(self.input_len())),
+      Err(Err::IncompleteSuccess(..)) => Ok(self.take_split(self.input_len())),
       res => res,
     }
   }
@@ -547,7 +547,7 @@ impl<T: InputLength + InputIter + InputTake + Clone + UnspecializedInput> InputT
     P: Fn(Self::Item) -> bool,
   {
     match self.split_at_position1(predicate, e) {
-      Err(Err::Incomplete(_)) => {
+      Err(Err::IncompleteSuccess(..)) => {
         if self.input_len() == 0 {
           Err(Err::Error(E::from_error_kind(self.clone(), e)))
         } else {
@@ -568,7 +568,7 @@ impl<'a> InputTakeAtPosition for &'a [u8] {
   {
     match self.iter().position(|c| predicate(*c)) {
       Some(i) => Ok(self.take_split(i)),
-      None => Err(Err::Incomplete(Needed::new(1))),
+      None => Err(Err::IncompleteSuccess(self.take_split(self.input_len()), Needed::new(1))),
     }
   }
 
@@ -583,7 +583,7 @@ impl<'a> InputTakeAtPosition for &'a [u8] {
     match self.iter().position(|c| predicate(*c)) {
       Some(0) => Err(Err::Error(E::from_error_kind(self, e))),
       Some(i) => Ok(self.take_split(i)),
-      None => Err(Err::Incomplete(Needed::new(1))),
+      None => Err(Err::IncompleteSuccess(self.take_split(self.input_len()), Needed::new(1))),
     }
   }
 
@@ -632,7 +632,7 @@ impl<'a> InputTakeAtPosition for &'a str {
     match self.find(predicate) {
       // find() returns a byte index that is already in the slice at a char boundary
       Some(i) => unsafe { Ok((self.get_unchecked(i..), self.get_unchecked(..i))) },
-      None => Err(Err::Incomplete(Needed::new(1))),
+      None => Err(Err::IncompleteSuccess(self.take_split(self.input_len()), Needed::new(1))),
     }
   }
 
@@ -648,7 +648,7 @@ impl<'a> InputTakeAtPosition for &'a str {
       Some(0) => Err(Err::Error(E::from_error_kind(self, e))),
       // find() returns a byte index that is already in the slice at a char boundary
       Some(i) => unsafe { Ok((self.get_unchecked(i..), self.get_unchecked(..i))) },
-      None => Err(Err::Incomplete(Needed::new(1))),
+      None => Err(Err::IncompleteSuccess(self.take_split(self.input_len()), Needed::new(1))),
     }
   }
 
