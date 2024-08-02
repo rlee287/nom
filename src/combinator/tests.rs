@@ -216,7 +216,7 @@ fn opt_test() {
   let c = &b"ab"[..];
   assert_eq!(opt_abcd(a), Ok((&b"ef"[..], Some(&b"abcd"[..]))));
   assert_eq!(opt_abcd(b), Ok((&b"bcdefg"[..], None)));
-  assert_eq!(opt_abcd(c), Err(Err::Incomplete(Needed::new(2))));
+  assert_eq!(opt_abcd(c), Err(Err::IncompleteSuccess((&b"ab"[..], None), Needed::new(2))));
 }
 
 #[test]
@@ -226,7 +226,7 @@ fn peek_test() {
   }
 
   assert_eq!(peek_tag(&b"abcdef"[..]), Ok((&b"abcdef"[..], &b"abcd"[..])));
-  assert_eq!(peek_tag(&b"ab"[..]), Err(Err::Incomplete(Needed::new(2))));
+  assert_eq!(peek_tag(&b"ab"[..]), Err(Err::IncompleteFail(error_position!(&b"ab"[..], ErrorKind::Tag), Needed::new(2))));
   assert_eq!(
     peek_tag(&b"xxx"[..]),
     Err(Err::Error(error_position!(&b"xxx"[..], ErrorKind::Tag)))
@@ -243,7 +243,7 @@ fn not_test() {
     not_aaa(&b"aaa"[..]),
     Err(Err::Error(error_position!(&b"aaa"[..], ErrorKind::Not)))
   );
-  assert_eq!(not_aaa(&b"aa"[..]), Err(Err::Incomplete(Needed::new(1))));
+  assert_eq!(not_aaa(&b"aa"[..]), Err(Err::IncompleteFail(error_position!(&b"aa"[..], ErrorKind::Not), Needed::new(1))));
   assert_eq!(not_aaa(&b"abcd"[..]), Ok((&b"abcd"[..], ())));
 }
 
@@ -254,7 +254,7 @@ fn verify_test() {
   fn test(i: &[u8]) -> IResult<&[u8], &[u8]> {
     verify(take(5u8), |slice: &[u8]| slice[0] == b'a')(i)
   }
-  assert_eq!(test(&b"bcd"[..]), Err(Err::Incomplete(Needed::new(2))));
+  assert_eq!(test(&b"bcd"[..]), Err(Err::IncompleteFail(error_position!(&b"bcd"[..], ErrorKind::Eof), Needed::new(2))));
   assert_eq!(
     test(&b"bcdefg"[..]),
     Err(Err::Error(error_position!(
