@@ -41,7 +41,12 @@ where
 
     let res: IResult<_, _, Error> = match i.compare(t) {
       CompareResult::Ok => Ok(i.take_split(tag_len)),
-      CompareResult::Incomplete => Err(Err::Incomplete(Needed::new(tag_len - i.input_len()))),
+      CompareResult::Incomplete => {
+        let e: ErrorKind = ErrorKind::Tag;
+        let needed_len = tag_len - i.input_len();
+        // On EOF incomplete tag -> fail
+        Err(Err::IncompleteFail(Error::from_error_kind(i, e), Needed::new(needed_len)))
+      },
       CompareResult::Error => {
         let e: ErrorKind = ErrorKind::Tag;
         Err(Err::Error(Error::from_error_kind(i, e)))
@@ -83,7 +88,12 @@ where
 
     let res: IResult<_, _, Error> = match (i).compare_no_case(t) {
       CompareResult::Ok => Ok(i.take_split(tag_len)),
-      CompareResult::Incomplete => Err(Err::Incomplete(Needed::new(tag_len - i.input_len()))),
+      CompareResult::Incomplete => {
+        let e: ErrorKind = ErrorKind::Eof;
+        let needed_len = tag_len - i.input_len();
+        // On EOF incomplete tag -> fail
+        Err(Err::IncompleteFail(Error::from_error_kind(i, e), Needed::new(needed_len)))
+      },
       CompareResult::Error => {
         let e: ErrorKind = ErrorKind::Tag;
         Err(Err::Error(Error::from_error_kind(i, e)))
