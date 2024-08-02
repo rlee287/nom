@@ -260,7 +260,9 @@ where
     match f.parse(input) {
       Ok((i, o)) => Ok((i, Some(o))),
       Err(Err::Error(_)) => Ok((i, None)),
-      Err(e) => Err(e),
+      Err(Err::IncompleteSuccess((i, o), n)) => Err(Err::IncompleteSuccess((i, Some(o)), n)),
+      Err(Err::IncompleteFail(_, n)) => Err(Err::IncompleteSuccess((i, None), n)),
+      Err(e) => Err(e.replace_output_type()),
     }
   }
 }
@@ -292,10 +294,7 @@ where
 {
   move |input: I| {
     if b {
-      match f.parse(input) {
-        Ok((i, o)) => Ok((i, Some(o))),
-        Err(e) => Err(e),
-      }
+      iresult_map_out(f.parse(input), |o| Some(o))
     } else {
       Ok((input, None))
     }
@@ -324,6 +323,7 @@ where
     let i = input.clone();
     match f.parse(input) {
       Ok((_, o)) => Ok((i, o)),
+      Err(Err::IncompleteSuccess((_, o), n)) => Err(Err::IncompleteSuccess((i, o), n)),
       Err(e) => Err(e),
     }
   }
