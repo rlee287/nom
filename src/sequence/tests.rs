@@ -96,11 +96,11 @@ fn pair_test() {
   );
   assert_eq!(
     pair_abc_def(&b"ab"[..]),
-    Err(Err::Incomplete(Needed::new(1)))
+    Err(Err::IncompleteFail(error_position!(&b"ab"[..], ErrorKind::Tag), Needed::new(1)))
   );
   assert_eq!(
     pair_abc_def(&b"abcd"[..]),
-    Err(Err::Incomplete(Needed::new(2)))
+    Err(Err::IncompleteFail(error_position!(&b"abcd"[..], ErrorKind::Tag), Needed::new(2)))
   );
   assert_eq!(
     pair_abc_def(&b"xxx"[..]),
@@ -128,11 +128,11 @@ fn separated_pair_test() {
   );
   assert_eq!(
     sep_pair_abc_def(&b"ab"[..]),
-    Err(Err::Incomplete(Needed::new(1)))
+    Err(Err::IncompleteFail(error_position!(&b"ab"[..], ErrorKind::Tag), Needed::new(1)))
   );
   assert_eq!(
     sep_pair_abc_def(&b"abc,d"[..]),
-    Err(Err::Incomplete(Needed::new(2)))
+    Err(Err::IncompleteFail(error_position!(&b"abc,d"[..], ErrorKind::Tag), Needed::new(2)))
   );
   assert_eq!(
     sep_pair_abc_def(&b"xxx"[..]),
@@ -160,11 +160,11 @@ fn preceded_test() {
   );
   assert_eq!(
     preceded_abcd_efgh(&b"ab"[..]),
-    Err(Err::Incomplete(Needed::new(2)))
+    Err(Err::IncompleteFail(error_position!(&b"ab"[..], ErrorKind::Tag), Needed::new(2)))
   );
   assert_eq!(
     preceded_abcd_efgh(&b"abcde"[..]),
-    Err(Err::Incomplete(Needed::new(3)))
+    Err(Err::IncompleteFail(error_position!(&b"abcde"[..], ErrorKind::Tag), Needed::new(3)))
   );
   assert_eq!(
     preceded_abcd_efgh(&b"xxx"[..]),
@@ -192,11 +192,11 @@ fn terminated_test() {
   );
   assert_eq!(
     terminated_abcd_efgh(&b"ab"[..]),
-    Err(Err::Incomplete(Needed::new(2)))
+    Err(Err::IncompleteFail(error_position!(&b"ab"[..], ErrorKind::Tag), Needed::new(2)))
   );
   assert_eq!(
     terminated_abcd_efgh(&b"abcde"[..]),
-    Err(Err::Incomplete(Needed::new(3)))
+    Err(Err::IncompleteFail(error_position!(&b"abcde"[..], ErrorKind::Tag), Needed::new(3)))
   );
   assert_eq!(
     terminated_abcd_efgh(&b"xxx"[..]),
@@ -224,15 +224,15 @@ fn delimited_test() {
   );
   assert_eq!(
     delimited_abc_def_ghi(&b"ab"[..]),
-    Err(Err::Incomplete(Needed::new(1)))
+    Err(Err::IncompleteFail(error_position!(&b"ab"[..], ErrorKind::Tag), Needed::new(1)))
   );
   assert_eq!(
     delimited_abc_def_ghi(&b"abcde"[..]),
-    Err(Err::Incomplete(Needed::new(1)))
+    Err(Err::IncompleteFail(error_position!(&b"abcde"[..], ErrorKind::Tag), Needed::new(1)))
   );
   assert_eq!(
     delimited_abc_def_ghi(&b"abcdefgh"[..]),
-    Err(Err::Incomplete(Needed::new(1)))
+    Err(Err::IncompleteFail(error_position!(&b"ancdefgh"[..], ErrorKind::Tag), Needed::new(1)))
   );
   assert_eq!(
     delimited_abc_def_ghi(&b"xxx"[..]),
@@ -265,8 +265,8 @@ fn tuple_test() {
     tuple_3(&b"abcdefgh"[..]),
     Ok((&b"h"[..], (0x6162u16, &b"cde"[..], &b"fg"[..])))
   );
-  assert_eq!(tuple_3(&b"abcd"[..]), Err(Err::Incomplete(Needed::new(1))));
-  assert_eq!(tuple_3(&b"abcde"[..]), Err(Err::Incomplete(Needed::new(2))));
+  assert_eq!(tuple_3(&b"abcd"[..]), Err(Err::IncompleteFail(error_position!(&b"abcd"[..], ErrorKind::Eof), Needed::new(1))));
+  assert_eq!(tuple_3(&b"abcde"[..]), Err(Err::IncompleteFail(error_position!(&b"abcde"[..], ErrorKind::Tag), Needed::new(2))));
   assert_eq!(
     tuple_3(&b"abcdejk"[..]),
     Err(Err::Error(error_position!(&b"jk"[..], ErrorKind::Tag)))
