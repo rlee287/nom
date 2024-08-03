@@ -4,7 +4,7 @@
 mod tests;
 
 use crate::error::ParseError;
-use crate::internal::{IResult, Parser};
+use crate::internal::{Err, Needed, IResult, Parser, to_incomplete_success, iresult_map_out};
 
 /// Gets an object from the first parser,
 /// then gets another object from the second parser.
@@ -35,8 +35,13 @@ where
   G: Parser<I, O2, E>,
 {
   move |input: I| {
-    let (input, o1) = first.parse(input)?;
-    second.parse(input).map(|(i, o2)| (i, (o1, o2)))
+    match first.parse(input) {
+      Ok((input, o1)) => iresult_map_out(second.parse(input), |o2| (o1, o2)),
+      Err(Err::IncompleteSuccess((input, o1), n)) => to_incomplete_success(iresult_map_out(second.parse(input), |o2| (o1, o2)), n),
+      Err(e) => {
+        return Err(e.replace_output_type());
+      }
+    }
   }
 }
 
@@ -69,8 +74,13 @@ where
   G: Parser<I, O2, E>,
 {
   move |input: I| {
-    let (input, _) = first.parse(input)?;
-    second.parse(input)
+    match first.parse(input) {
+      Ok((input, _o1)) => second.parse(input),
+      Err(Err::IncompleteSuccess((input, _o1), n)) => to_incomplete_success(second.parse(input), n),
+      Err(e) => {
+        return Err(e.replace_output_type());
+      }
+    }
   }
 }
 
@@ -103,8 +113,13 @@ where
   G: Parser<I, O2, E>,
 {
   move |input: I| {
-    let (input, o1) = first.parse(input)?;
-    second.parse(input).map(|(i, _)| (i, o1))
+    match first.parse(input) {
+      Ok((input, o1)) => iresult_map_out(second.parse(input), |_o2| o1),
+      Err(Err::IncompleteSuccess((input, o1), n)) => to_incomplete_success(iresult_map_out(second.parse(input), |_o2| o1), n),
+      Err(e) => {
+        return Err(e);
+      }
+    }
   }
 }
 
@@ -141,9 +156,21 @@ where
   H: Parser<I, O3, E>,
 {
   move |input: I| {
-    let (input, o1) = first.parse(input)?;
-    let (input, _) = sep.parse(input)?;
-    second.parse(input).map(|(i, o2)| (i, (o1, o2)))
+    let (i, o1, n) = match first.parse(input) {
+      Ok((i, o1)) => (i, o1, None),
+      Err(Err::IncompleteSuccess((i, o1), n)) => (i, o1, Some(n)),
+      Err(e) => return Err(e.replace_output_type())
+    };
+    let (i, n) = match sep.parse(i) {
+      Ok((i, _)) => (i, n),
+      Err(Err::IncompleteSuccess((i, _), n2)) => (i, n.or(Some(n2))),
+      Err(e) => return Err(e.replace_output_type())
+    };
+    let second_parse_result = match n {
+      Some(n) => to_incomplete_success(second.parse(i), n),
+      None => second.parse(i)
+    };
+    iresult_map_out(second_parse_result, |o3| (o1, o3))
   }
 }
 
@@ -180,9 +207,21 @@ where
   H: Parser<I, O3, E>,
 {
   move |input: I| {
-    let (input, _) = first.parse(input)?;
-    let (input, o2) = second.parse(input)?;
-    third.parse(input).map(|(i, _)| (i, o2))
+    let (i, n) = match first.parse(input) {
+      Ok((i, _o1)) => (i, None),
+      Err(Err::IncompleteSuccess((i, _o1), n)) => (i, Some(n)),
+      Err(e) => return Err(e.replace_output_type())
+    };
+    let (i, o2, n) = match second.parse(i) {
+      Ok((i, o2)) => (i, o2, n),
+      Err(Err::IncompleteSuccess((i, o2), n2)) => (i, o2, n.or(Some(n2))),
+      Err(e) => return Err(e.replace_output_type())
+    };
+    let third_parse_result = match n {
+      Some(n) => to_incomplete_success(third.parse(i), n),
+      None => third.parse(i)
+    };
+    iresult_map_out(third_parse_result, |_o3| o2)
   }
 }
 
