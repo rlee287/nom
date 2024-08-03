@@ -44,7 +44,7 @@ mod test {
 
     let res: IResult<_, _, error::Error<_>> = tag(TAG)(INPUT);
     match res {
-      Err(Err::Incomplete(_)) => (),
+      Err(Err::IncompleteFail(..)) => (),
       other => {
         panic!(
           "Parser `tag` didn't require more input when it should have. \
@@ -141,7 +141,7 @@ mod test {
 
     let res: IResult<_, _, (_, ErrorKind)> = take(13_usize)(INPUT);
     match res {
-      Err(Err::Incomplete(_)) => (),
+      Err(Err::IncompleteFail(..)) => (),
       other => panic!(
         "Parser `take` didn't require more input when it should have. \
          Got `{:?}`.",
@@ -168,8 +168,8 @@ mod test {
     let c = "abcd123";
     let d = "123";
 
-    assert_eq!(f(&a[..]), Err(Err::Incomplete(Needed::new(1))));
-    assert_eq!(f(&b[..]), Err(Err::Incomplete(Needed::new(1))));
+    assert_eq!(f(&a[..]), Err(Err::IncompleteSuccess(("", ""), Needed::new(1))));
+    assert_eq!(f(&b[..]), Err(Err::IncompleteSuccess(("", "abcd"), Needed::new(1))));
     assert_eq!(f(&c[..]), Ok((&d[..], &b[..])));
     assert_eq!(f(&d[..]), Ok((&d[..], &a[..])));
   }
@@ -186,8 +186,8 @@ mod test {
     let c = "abcd123";
     let d = "123";
 
-    assert_eq!(f(&a[..]), Err(Err::Incomplete(Needed::new(1))));
-    assert_eq!(f(&b[..]), Err(Err::Incomplete(Needed::new(1))));
+    assert_eq!(f(&a[..]), Err(Err::IncompleteFail(error_position!(&a[..], ErrorKind::TakeWhile1), Needed::new(1))));
+    assert_eq!(f(&b[..]), Err(Err::IncompleteSuccess(("", "abcd"), Needed::new(1))));
     assert_eq!(f(&c[..]), Ok((&"123"[..], &b[..])));
     assert_eq!(
       f(&d[..]),
@@ -405,7 +405,7 @@ mod test {
 
     let res: IResult<_, _, (_, ErrorKind)> = take_until(FIND)(INPUT);
     match res {
-      Err(Err::Incomplete(_)) => (),
+      Err(Err::IncompleteFail(..)) => (),
       other => panic!(
         "Parser `take_until` didn't require more input when it should have. \
          Got `{:?}`.",
@@ -491,7 +491,7 @@ mod test {
 
     let res: IResult<_, _, (_, ErrorKind)> = take_until(FIND)(INPUT);
     match res {
-      Err(Err::Incomplete(_)) => (),
+      Err(Err::IncompleteFail(..)) => (),
       other => panic!(
         "Parser `take_until` didn't fail when it should have. \
          Got `{:?}`.",
