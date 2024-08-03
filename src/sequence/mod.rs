@@ -4,7 +4,7 @@
 mod tests;
 
 use crate::error::ParseError;
-use crate::internal::{Err, Needed, IResult, Parser, to_incomplete_success, iresult_map_out};
+use crate::internal::{Err, IResult, Parser, to_incomplete_success, iresult_map_out};
 
 /// Gets an object from the first parser,
 /// then gets another object from the second parser.
@@ -237,7 +237,7 @@ impl<Input, Output, Error: ParseError<Input>, F: Parser<Input, Output, Error>>
   Tuple<Input, (Output,), Error> for (F,)
 {
   fn parse(&mut self, input: Input) -> IResult<Input, (Output,), Error> {
-    self.0.parse(input).map(|(i, o)| (i, (o,)))
+    iresult_map_out(self.0.parse(input), |o| (o,))
   }
 }
 
@@ -263,28 +263,42 @@ macro_rules! tuple_trait_impl(
     > Tuple<Input, ( $($ty),+ ), Error> for ( $($name),+ ) {
 
       fn parse(&mut self, input: Input) -> IResult<Input, ( $($ty),+ ), Error> {
-        tuple_trait_inner!(0, self, input, (), $($name)+)
-
+        tuple_trait_inner!(0, self, input, (), None, $($name)+)
       }
     }
   );
 );
 
 macro_rules! tuple_trait_inner(
-  ($it:tt, $self:expr, $input:expr, (), $head:ident $($id:ident)+) => ({
-    let (i, o) = $self.$it.parse($input.clone())?;
+  ($it:tt, $self:expr, $input:expr, (), $needed:expr, $head:ident $($id:ident)+) => ({
+    let (i, o, n) = match $self.$it.parse($input.clone()) {
+      Ok((i, o)) => (i, o, $needed),
+      Err(Err::IncompleteSuccess((i, o), n)) => (i, o, $needed.or(Some(n))),
+      Err(e) => return Err(e.replace_output_type())
+    };
 
-    succ!($it, tuple_trait_inner!($self, i, ( o ), $($id)+))
+    succ!($it, tuple_trait_inner!($self, i, ( o ), n, $($id)+))
   });
-  ($it:tt, $self:expr, $input:expr, ($($parsed:tt)*), $head:ident $($id:ident)+) => ({
-    let (i, o) = $self.$it.parse($input.clone())?;
+  ($it:tt, $self:expr, $input:expr, ($($parsed:tt)*), $needed:expr, $head:ident $($id:ident)+) => ({
+    let (i, o, n) = match $self.$it.parse($input.clone()) {
+      Ok((i, o)) => (i, o, $needed),
+      Err(Err::IncompleteSuccess((i, o), n)) => (i, o, $needed.or(Some(n))),
+      Err(e) => return Err(e.replace_output_type())
+    };
 
-    succ!($it, tuple_trait_inner!($self, i, ($($parsed)* , o), $($id)+))
+    succ!($it, tuple_trait_inner!($self, i, ($($parsed)* , o), n, $($id)+))
   });
-  ($it:tt, $self:expr, $input:expr, ($($parsed:tt)*), $head:ident) => ({
-    let (i, o) = $self.$it.parse($input.clone())?;
-
-    Ok((i, ($($parsed)* , o)))
+  ($it:tt, $self:expr, $input:expr, ($($parsed:tt)*), $needed:expr, $head:ident) => ({
+    let (i, o, n) = match $self.$it.parse($input) {
+      Ok((i, o)) => (i, o, $needed),
+      Err(Err::IncompleteSuccess((i, o), n)) => (i, o, $needed.or(Some(n))),
+      Err(e) => return Err(e.replace_output_type())
+    };
+    let final_tuple = (i, ($($parsed)* , o));
+    match n {
+      Some(n) => Err(Err::IncompleteSuccess(final_tuple, n)),
+      None => Ok(final_tuple)
+    }
   });
 );
 
